@@ -5,16 +5,19 @@ const sqrt = require("bigint-isqrt");
 export interface PointOverFp {
     x: bigint;
     y: bigint;
+    z: bigint;
 }
 
 export interface PointOverFq {
     x: bigint[];
     y: bigint[];
+    z: bigint[];
 }
 
 export interface PointOverFqOverFq {
     x: bigint[][];
     y: bigint[][];
+    z: bigint[][];
 }
 
 // TODO: Implement Schoof's algorithm
@@ -61,7 +64,7 @@ export class EllipticCurveOverFp {
 
     // Comparators
     eq(P: PointOverFp, Q: PointOverFp): boolean {
-        return this.Fp.eq(P.x,Q.x) && this.Fp.eq(P.y,Q.y);
+        return this.Fp.eq(P.x,Q.x) && this.Fp.eq(P.y,Q.y) && this.Fp.eq(P.z, Q.z);
     }
 
     neq(P: PointOverFp, Q: PointOverFp): boolean {
@@ -73,8 +76,17 @@ export class EllipticCurveOverFp {
         return P === this.zero;
     }
 
+    make_affine(P: PointOverFp) {
+        let x_aff = this.Fp.div(P.x, this.Fp.mul(P.z, P.z))
+        let y_aff = this.Fp.div(P.y, this.Fp.mul(this.Fp.mul(P.z, P.z), P.z))
+        P.x = x_aff
+        P.y = y_aff
+        P.z = this.Fp.one
+    }
+
     // Check that a point is on the curve
     is_on_curve(P: PointOverFp): boolean {
+        this.make_affine(P)
         if (this.is_zero(P)) {
             return true;
         }
@@ -94,6 +106,7 @@ export class EllipticCurveOverFp {
 
         if (this.is_zero(Q)) return P;
 
+        // How to handle this in Jacobian ?
         if (P.x === Q.x) {
             if (P.y !== Q.y) {
                 // P = -Q
@@ -101,19 +114,55 @@ export class EllipticCurveOverFp {
             }
         }
 
-        let m: bigint;
-        if (P.x === Q.x && P.y === Q.y) {
-            m = this.Fp.div(
-                this.Fp.add(this.Fp.mul(3n, this.Fp.mul(P.x, P.x)), this.a),
-                this.Fp.mul(2n, P.y)
-            );
-        } else {
-            m = this.Fp.div(this.Fp.sub(Q.y, P.y), this.Fp.sub(Q.x, P.x));
-        }
+        // let m: bigint;
+        // if (P.x === Q.x && P.y === Q.y) {
+        //     m = this.Fp.div(
+        //         this.Fp.add(this.Fp.mul(3n, this.Fp.mul(P.x, P.x)), this.a),
+        //         this.Fp.mul(2n, P.y)
+        //     );
+        // } else {
+        //     m = this.Fp.div(this.Fp.sub(Q.y, P.y), this.Fp.sub(Q.x, P.x));
+        // }
 
-        const x = this.Fp.sub(this.Fp.sub(this.Fp.mul(m, m), P.x), Q.x);
-        const y = this.Fp.sub(this.Fp.mul(m, this.Fp.sub(P.x, x)), P.y);
-        return { x, y };
+        // const x = this.Fp.sub(this.Fp.sub(this.Fp.mul(m, m), P.x), Q.x);
+        // const y = this.Fp.sub(this.Fp.mul(m, this.Fp.sub(P.x, x)), P.y);
+        // return { x, y };
+        
+        if (this.eq(P, Q)) {
+            // https://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
+            let a = this.Fp.mul(P.x, P.x)
+            let b = this.Fp.mul(P.y, P.y)
+            let c = this.Fp.mul(b, b)
+            let x1plusb = this.Fp.add(P.x, b)
+            let x1plusbsq = this.Fp.mul(x1plusb, x1plusb)
+            let d = this.Fp.mul(2n, this.Fp.sub(this.Fp.sub(x1plusbsq, a), b))
+            let e = this.Fp.mul(3n, a)
+            let f = this.Fp.mul(e, e)
+            const x = this.Fp.sub(f, this.Fp.mul(2n, d))
+            const y = this.Fp.sub(this.Fp.mul(e, this.Fp.sub(d, x)), this.Fp.mul(8n, c))
+            const z = this.Fp.mul(2n, this.Fp.mul(P.y, P.z))
+            return {x, y, z}
+        } else {
+            // https://hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
+            let z1z1 = this.Fp.mul(P.z, P.z)
+            let z2z2 = this.Fp.mul(Q.z, Q.z)
+            let u1 = this.Fp.mul(P.x, z2z2)
+            let u2 = this.Fp.mul(Q.x, z1z1)
+            let s1 = this.Fp.mul(P.y, this.Fp.mul(Q.z, z2z2))
+            let s2 = this.Fp.mul(Q.y, this.Fp.mul(P.z, z1z1))
+            let h = this.Fp.sub(u2, u1)
+            let hsq = this.Fp.mul(2n, h)
+            let i = this.Fp.mul(hsq, hsq)
+            let j = this.Fp.mul(h, i)
+            let r = this.Fp.mul(2n, this.Fp.sub(s2, s1))
+            let v = this.Fp.mul(u1, i)
+            const x = this.Fp.sub(this.Fp.mul(r, r), this.Fp.sub(j, this.Fp.mul(2n, v)))
+            const y = this.Fp.sub(this.Fp.mul(r, this.Fp.sub(v, x)), this.Fp.mul(2n, this.Fp.mul(s1, j)))
+            let z1z2 = this.Fp.add(P.z, Q.z)
+            let z1z2sq = this.Fp.mul(z1z2, z1z2)
+            const z = this.Fp.mul(h, this.Fp.sub(this.Fp.sub(z1z2sq, z1z1), z2z2))
+            return {x, y, z};
+        }
     }
 
     sub(P: PointOverFp, Q: PointOverFp): PointOverFp {
@@ -123,7 +172,7 @@ export class EllipticCurveOverFp {
     neg(P: PointOverFp): PointOverFp {
         if (this.is_zero(P)) return this.zero;
 
-        return { x: this.Fp.mod(P.x), y: this.Fp.neg(P.y) };
+        return { x: this.Fp.mod(P.x), y: this.Fp.neg(P.y), z: P.z };
     }
 
     escalarMul(P: PointOverFp, k: bigint): PointOverFp {
@@ -182,7 +231,7 @@ export class EllipticCurveOverFq {
 
     // Comparators
     eq(P: PointOverFq, Q: PointOverFq): boolean {
-        return this.Fq.eq(P.x,Q.x) && this.Fq.eq(P.y,Q.y);
+        return this.Fq.eq(P.x,Q.x) && this.Fq.eq(P.y,Q.y) && this.Fq.eq(P.z, P.z);
     }
 
     neq(P: PointOverFq, Q: PointOverFq): boolean {
@@ -194,8 +243,16 @@ export class EllipticCurveOverFq {
         return P === this.zero;
     }
 
+    make_affine(P: PointOverFq) {
+        let x_aff = this.Fq.div(P.x, this.Fq.mul(P.z, P.z))
+        let y_aff = this.Fq.div(P.y, this.Fq.mul(this.Fq.mul(P.z, P.z), P.z))
+        P.x = x_aff
+        P.y = y_aff
+        P.z = this.Fq.one
+    }
     // Check that a point is on the curve
     is_on_curve(P: PointOverFq): boolean {
+        this.make_affine(P)
         if (this.is_zero(P)) {
             return true;
         }
@@ -222,19 +279,55 @@ export class EllipticCurveOverFq {
             }
         }
 
-        let m: bigint[];
-        if (this.Fq.eq(P.x, Q.x) && this.Fq.eq(P.y, Q.y)) {
-            m = this.Fq.div(
-                this.Fq.add(this.Fq.mul([3n], this.Fq.mul(P.x, P.x)), this.a),
-                this.Fq.mul([2n], P.y)
-            );
-        } else {
-            m = this.Fq.div(this.Fq.sub(Q.y, P.y), this.Fq.sub(Q.x, P.x));
-        }
+        // let m: bigint[];
+        // if (this.Fq.eq(P.x, Q.x) && this.Fq.eq(P.y, Q.y)) {
+        //     m = this.Fq.div(
+        //         this.Fq.add(this.Fq.mul([3n], this.Fq.mul(P.x, P.x)), this.a),
+        //         this.Fq.mul([2n], P.y)
+        //     );
+        // } else {
+        //     m = this.Fq.div(this.Fq.sub(Q.y, P.y), this.Fq.sub(Q.x, P.x));
+        // }
 
-        const x = this.Fq.sub(this.Fq.sub(this.Fq.mul(m, m), P.x), Q.x);
-        const y = this.Fq.sub(this.Fq.mul(m, this.Fq.sub(P.x, x)), P.y);
-        return { x, y };
+        // const x = this.Fq.sub(this.Fq.sub(this.Fq.mul(m, m), P.x), Q.x);
+        // const y = this.Fq.sub(this.Fq.mul(m, this.Fq.sub(P.x, x)), P.y);
+        // return { x, y };
+
+        if (this.eq(P, Q)) {
+            // https://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
+            let a = this.Fq.mul(P.x, P.x)
+            let b = this.Fq.mul(P.y, P.y)
+            let c = this.Fq.mul(b, b)
+            let x1plusb = this.Fq.add(P.x, b)
+            let x1plusbsq = this.Fq.mul(x1plusb, x1plusb)
+            let d = this.Fq.mul([2n], this.Fq.sub(this.Fq.sub(x1plusbsq, a), b))
+            let e = this.Fq.mul([3n], a)
+            let f = this.Fq.mul(e, e)
+            const x = this.Fq.sub(f, this.Fq.mul([2n], d))
+            const y = this.Fq.sub(this.Fq.mul(e, this.Fq.sub(d, x)), this.Fq.mul([8n], c))
+            const z = this.Fq.mul([2n], this.Fq.mul(P.y, P.z))
+            return {x, y, z}
+        } else {
+            // https://hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
+            let z1z1 = this.Fq.mul(P.z, P.z)
+            let z2z2 = this.Fq.mul(Q.z, Q.z)
+            let u1 = this.Fq.mul(P.x, z2z2)
+            let u2 = this.Fq.mul(Q.x, z1z1)
+            let s1 = this.Fq.mul(P.y, this.Fq.mul(Q.z, z2z2))
+            let s2 = this.Fq.mul(Q.y, this.Fq.mul(P.z, z1z1))
+            let h = this.Fq.sub(u2, u1)
+            let hsq = this.Fq.mul([2n], h)
+            let i = this.Fq.mul(hsq, hsq)
+            let j = this.Fq.mul(h, i)
+            let r = this.Fq.mul([2n], this.Fq.sub(s2, s1))
+            let v = this.Fq.mul(u1, i)
+            const x = this.Fq.sub(this.Fq.mul(r, r), this.Fq.sub(j, this.Fq.mul([2n], v)))
+            const y = this.Fq.sub(this.Fq.mul(r, this.Fq.sub(v, x)), this.Fq.mul([2n], this.Fq.mul(s1, j)))
+            let z1z2 = this.Fq.add(P.z, Q.z)
+            let z1z2sq = this.Fq.mul(z1z2, z1z2)
+            const z = this.Fq.mul(h, this.Fq.sub(this.Fq.sub(z1z2sq, z1z1), z2z2))
+            return {x, y, z};
+        }
     }
 
     sub(P: PointOverFq, Q: PointOverFq): PointOverFq {
@@ -244,7 +337,7 @@ export class EllipticCurveOverFq {
     neg(P: PointOverFq): PointOverFq {
         if (this.is_zero(P)) return this.zero;
 
-        return { x: this.Fq.mod(P.x), y: this.Fq.neg(P.y) };
+        return { x: this.Fq.mod(P.x), y: this.Fq.neg(P.y), z: P.z };
     }
 
     escalarMul(P: PointOverFq, k: bigint): PointOverFq {
@@ -303,7 +396,7 @@ export class EllipticCurveOverFqOverFq {
 
     // Comparators
     eq(P: PointOverFqOverFq, Q: PointOverFqOverFq): boolean {
-        return this.Fq.eq(P.x,Q.x) && this.Fq.eq(P.y,Q.y);
+        return this.Fq.eq(P.x,Q.x) && this.Fq.eq(P.y,Q.y) && this.Fq.eq(P.z, Q.z);
     }
 
     neq(P: PointOverFqOverFq, Q: PointOverFqOverFq): boolean {
@@ -315,8 +408,16 @@ export class EllipticCurveOverFqOverFq {
         return P === this.zero;
     }
 
+    make_affine(P: PointOverFqOverFq) {
+        let x_aff = this.Fq.div(P.x, this.Fq.mul(P.z, P.z))
+        let y_aff = this.Fq.div(P.y, this.Fq.mul(this.Fq.mul(P.z, P.z), P.z))
+        P.x = x_aff
+        P.y = y_aff
+        P.z = this.Fq.one
+    }
     // Check that a point is on the curve
     is_on_curve(P: PointOverFqOverFq): boolean {
+        this.make_affine(P)
         if (this.is_zero(P)) {
             return true;
         }
@@ -343,19 +444,55 @@ export class EllipticCurveOverFqOverFq {
             }
         }
 
-        let m: bigint[][];
-        if (this.Fq.eq(P.x, Q.x) && this.Fq.eq(P.y, Q.y)) {
-            m = this.Fq.div(
-                this.Fq.add(this.Fq.mul([[3n]], this.Fq.mul(P.x, P.x)), this.a),
-                this.Fq.mul([[2n]], P.y)
-            );
-        } else {
-            m = this.Fq.div(this.Fq.sub(Q.y, P.y), this.Fq.sub(Q.x, P.x));
-        }
+        // let m: bigint[][];
+        // if (this.Fq.eq(P.x, Q.x) && this.Fq.eq(P.y, Q.y)) {
+        //     m = this.Fq.div(
+        //         this.Fq.add(this.Fq.mul([[3n]], this.Fq.mul(P.x, P.x)), this.a),
+        //         this.Fq.mul([[2n]], P.y)
+        //     );
+        // } else {
+        //     m = this.Fq.div(this.Fq.sub(Q.y, P.y), this.Fq.sub(Q.x, P.x));
+        // }
 
-        const x = this.Fq.sub(this.Fq.sub(this.Fq.mul(m, m), P.x), Q.x);
-        const y = this.Fq.sub(this.Fq.mul(m, this.Fq.sub(P.x, x)), P.y);
-        return { x, y };
+        // const x = this.Fq.sub(this.Fq.sub(this.Fq.mul(m, m), P.x), Q.x);
+        // const y = this.Fq.sub(this.Fq.mul(m, this.Fq.sub(P.x, x)), P.y);
+        // return { x, y };
+
+        if (this.eq(P, Q)) {
+            // https://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#doubling-dbl-2009-l
+            let a = this.Fq.mul(P.x, P.x)
+            let b = this.Fq.mul(P.y, P.y)
+            let c = this.Fq.mul(b, b)
+            let x1plusb = this.Fq.add(P.x, b)
+            let x1plusbsq = this.Fq.mul(x1plusb, x1plusb)
+            let d = this.Fq.mul([[2n]], this.Fq.sub(this.Fq.sub(x1plusbsq, a), b))
+            let e = this.Fq.mul([[3n]], a)
+            let f = this.Fq.mul(e, e)
+            const x = this.Fq.sub(f, this.Fq.mul([[2n]], d))
+            const y = this.Fq.sub(this.Fq.mul(e, this.Fq.sub(d, x)), this.Fq.mul([[8n]], c))
+            const z = this.Fq.mul([[2n]], this.Fq.mul(P.y, P.z))
+            return {x, y, z}
+        } else {
+            // https://hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
+            let z1z1 = this.Fq.mul(P.z, P.z)
+            let z2z2 = this.Fq.mul(Q.z, Q.z)
+            let u1 = this.Fq.mul(P.x, z2z2)
+            let u2 = this.Fq.mul(Q.x, z1z1)
+            let s1 = this.Fq.mul(P.y, this.Fq.mul(Q.z, z2z2))
+            let s2 = this.Fq.mul(Q.y, this.Fq.mul(P.z, z1z1))
+            let h = this.Fq.sub(u2, u1)
+            let hsq = this.Fq.mul([[2n]], h)
+            let i = this.Fq.mul(hsq, hsq)
+            let j = this.Fq.mul(h, i)
+            let r = this.Fq.mul([[2n]], this.Fq.sub(s2, s1))
+            let v = this.Fq.mul(u1, i)
+            const x = this.Fq.sub(this.Fq.mul(r, r), this.Fq.sub(j, this.Fq.mul([[2n]], v)))
+            const y = this.Fq.sub(this.Fq.mul(r, this.Fq.sub(v, x)), this.Fq.mul([[2n]], this.Fq.mul(s1, j)))
+            let z1z2 = this.Fq.add(P.z, Q.z)
+            let z1z2sq = this.Fq.mul(z1z2, z1z2)
+            const z = this.Fq.mul(h, this.Fq.sub(this.Fq.sub(z1z2sq, z1z1), z2z2))
+            return {x, y, z};
+        }        
     }
 
     sub(P: PointOverFqOverFq, Q: PointOverFqOverFq): PointOverFqOverFq {
@@ -365,7 +502,7 @@ export class EllipticCurveOverFqOverFq {
     neg(P: PointOverFqOverFq): PointOverFqOverFq {
         if (this.is_zero(P)) return this.zero;
 
-        return { x: this.Fq.mod(P.x), y: this.Fq.neg(P.y) };
+        return { x: this.Fq.mod(P.x), y: this.Fq.neg(P.y), z: P.z };
     }
 
     escalarMul(P: PointOverFqOverFq, k: bigint): PointOverFqOverFq {

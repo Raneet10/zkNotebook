@@ -12,10 +12,10 @@ describe("EllipticCurve", () => {
     describe("is_zero()", () => {
         const tests = [
             {
-                P: { x: 0n, y: 0n },
+                P: { x: 0n, y: 0n, z: 0n },
             },
             {
-                P: { x: 1n, y: 0n },
+                P: { x: 1n, y: 0n, z: 0n },
             },
         ];
 
@@ -42,10 +42,10 @@ describe("EllipticCurve", () => {
     describe("is_on_curve()", () => {
         const tests = [
             {
-                P: { x: 0n, y: 0n },
+                P: { x: 0n, y: 0n, z: 0n },
             },
             {
-                P: { x: 1n, y: 0n },
+                P: { x: 1n, y: 0n, z:0n },
             },
         ];
 
